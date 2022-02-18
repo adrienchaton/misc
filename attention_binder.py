@@ -22,6 +22,9 @@ act_fn = torch.nn.Identity()  # TODO: check where to apply non-linearities (whic
 
 B = 8  # bag size, either positive or negative sequences
 S = torch.randn((B, L, d_hid))  # output of the pre-trained transformer encoder, e.g. BERT-like
+pad_pos = torch.randint(2, L, (B, 1))  # positions from which padding token start
+pad_mask = torch.arange(L).unsqueeze(0).repeat(B, 1)  # corresponding pad token mask
+pad_mask = torch.where(pad_mask >= pad_pos.repeat(1, L), torch.ones_like(pad_mask), torch.zeros_like(pad_mask))
 
 
 #########
@@ -57,7 +60,9 @@ per_residue_attn_logits = []
 for i_head in range(n_heads):  # TODO: can we speed this up without for loop ?
     per_residue_attn_logits.append(torch.matmul(attn_logits_emb[:, i_head, :, :], W_emb[i_head].T))  # B,L,1
 per_residue_attn_logits = torch.stack(per_residue_attn_logits, dim=1)  # B,n_heads,L,1
-per_residue_attn = torch.softmax(per_residue_attn_logits, dim=2)  # should be the multi-head a_emb
+pad_mask = pad_mask.unsqueeze(1).repeat(1, n_heads, 1).unsqueeze(-1)
+per_residue_attn_logits_masked = per_residue_attn_logits.masked_fill(pad_mask == 1, -9e15)  # -inf logits on pad positions
+per_residue_attn = torch.softmax(per_residue_attn_logits_masked, dim=2)  # should be the multi-head a_emb
 
 x = per_residue_attn*v_emb  # B,n_heads,L,d_head
 x = torch.sum(x, dim=2).reshape(B, n_heads*d_head)  # B,n_heads*d_head
